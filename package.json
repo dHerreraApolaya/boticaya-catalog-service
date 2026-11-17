@@ -25,6 +25,7 @@
     "seed:demo-catalog": "node --env-file-if-exists=.env scripts/seed-demo-catalog.mjs"
   },
   "dependencies": {
+    "@vercel/functions": "3.11.3",
     "express": "5.3.0",
     "pg": "8.23.1",
     "zod": "4.6.7"

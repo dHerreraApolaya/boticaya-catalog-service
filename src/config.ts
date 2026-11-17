@@ -14,15 +14,19 @@ const environmentSchema = z
     BOTICAYA_DB_PASSWORD: z.string().min(1),
     BOTICAYA_DB_SSL: booleanSchema.default(false),
     BOTICAYA_DB_CA_FILE: z.string().min(1).optional(),
+    BOTICAYA_DB_CA_PEM: z.string().min(1).optional(),
     BOTICAYA_HOST: z.string().min(1).default("127.0.0.1"),
     PORT: portSchema.default(8081),
     BOTICAYA_ORDERS_ENABLED: booleanSchema.default(false),
   })
   .superRefine((config, context) => {
+    if (config.BOTICAYA_DB_CA_FILE && config.BOTICAYA_DB_CA_PEM) {
+      context.addIssue({ code: "custom", path: ["BOTICAYA_DB_CA_PEM"], message: "Choose one CA source" });
+    }
     const loopback = ["localhost", "127.0.0.1", "::1"].includes(
       config.BOTICAYA_DB_HOST,
     );
-    if ((!loopback || config.BOTICAYA_DB_CA_FILE) && !config.BOTICAYA_DB_SSL) {
+    if ((!loopback || config.BOTICAYA_DB_CA_FILE || config.BOTICAYA_DB_CA_PEM) && !config.BOTICAYA_DB_SSL) {
       context.addIssue({
         code: "custom",
         path: ["BOTICAYA_DB_SSL"],

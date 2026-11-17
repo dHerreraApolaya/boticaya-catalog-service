@@ -18,3 +18,5 @@ coverage/
 *.keystore
 
 target/
+
+.vercel/

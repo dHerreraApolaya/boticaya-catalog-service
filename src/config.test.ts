@@ -113,3 +113,15 @@ describe("database certificate configuration", () => {
     ).toThrow();
   });
 });
+
+describe("serverless certificate and pool configuration", () => {
+  it("accepts an inline CA and keeps a small shared pool with verified TLS", async () => {
+    const pool = createPool(readConfig({ ...credentials, BOTICAYA_DB_SSL: "true", BOTICAYA_DB_CA_PEM: "test-public-ca" }), { serverless: true });
+    expect(pool.options).toMatchObject({ ssl: { rejectUnauthorized: true, ca: "test-public-ca" }, max: 2, idleTimeoutMillis: 5000 });
+    await pool.end();
+  });
+  it("rejects ambiguous certificates and inline certificates without TLS", () => {
+    expect(() => readConfig({ ...credentials, BOTICAYA_DB_SSL: "true", BOTICAYA_DB_CA_PEM: "test-ca", BOTICAYA_DB_CA_FILE: "/test/ca" })).toThrow();
+    expect(() => readConfig({ ...credentials, BOTICAYA_DB_CA_PEM: "test-ca" })).toThrow();
+  });
+});

@@ -1,0 +1,11 @@
+.git
+.env*
+**/.env*
+.vercel
+coverage
+node_modules
+tests
+data
+sql
+scripts
+.agents
