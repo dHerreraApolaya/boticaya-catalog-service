@@ -43,8 +43,9 @@ The open-data license indexed for an unrelated CENARES distribution dataset does
 
 - Supabase connectivity: read-only connection/projection verification passed on 2026-11-17 without retrieving product rows. This confirms connection/TLS/projection, not restricted runtime privileges or a populated catalog.
 - Import utility: insert-only, transactional, stable IDs, default validation-only mode; see [CATALOG_IMPORT.md](CATALOG_IMPORT.md).
-- Migration 004 and new application code: validate first in isolated PostgreSQL. Do not apply to Supabase automatically as a side effect of tests or server startup.
-- Runtime identity: run the restricted-reader verification before exposing catalog endpoints. Administrative diagnostic credentials are not acceptable proof of RLS isolation.
+- Migration 004: validated in isolated PostgreSQL and applied deliberately to the empty development catalog. It is not executed by tests or application startup. See [deployment evidence](CATALOG_INTEGRATION_DEPLOYMENT.md).
+- Runtime identity: dedicated reader provisioned with explicit user authorization conditioned on maintaining Free. TLS and effective restricted permissions verified before activating the local runtime configuration. Administrative credentials are separated in ignored maintenance configuration.
+- Actual API smoke test: categories and numbered/typo catalog requests returned 200 with empty results through the reader; an excessive page returned 400. This proves the API-to-Supabase path, not product display.
 - Source approval, commercial inputs and publication: pending. The end-to-end business goal remains open until these arrive.
 
 Final acceptance must compare the same approved published product IDs and commercial values across Supabase, the HTTP response and browser cards, then exercise typo search, category combinations, exact totals, page navigation, empty/error states and draft invisibility. Confirm no silent fallback to local fixtures and keep orders disabled. A successful empty API response is a connectivity check, not proof that products were imported or displayed.

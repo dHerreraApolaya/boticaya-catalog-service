@@ -146,3 +146,5 @@ This repository owns the Express catalog, inventory, local orders, SQL and API t
 See [SUPABASE.md](SUPABASE.md). Run `pnpm verify:database` to verify connectivity, SELECT permission and catalog columns without retrieving rows or changing the schema.
 
 For repeatable, insert-only catalog loading and recovery, see [CATALOG_IMPORT.md](CATALOG_IMPORT.md).
+
+The API-backed web catalog uses [numbered typo-tolerant search](CATALOG_API.md) and a [restricted runtime reader](CATALOG_RUNTIME.md). See [development integration evidence](CATALOG_INTEGRATION_DEPLOYMENT.md) and [remaining business inputs](E2E_READINESS.md) before importing or publishing real products.
