@@ -16,3 +16,5 @@ coverage/
 *.pfx
 *.jks
 *.keystore
+
+target/
