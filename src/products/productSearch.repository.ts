@@ -9,26 +9,30 @@ export async function loadProductSearchTerms(pool: Pick<Pool, 'query'>, query: s
 }
 
 export function buildProductSearchQuery(search: ProductSearch, terms?: SearchTerms) {
-  const values: (string | number | boolean)[] = [];
+  const values: (string | number | boolean | null)[] = [];
   const conditions = ["p.status='published'", 'c.is_active', '(b.id IS NULL OR b.is_active)'];
-  const parameter = (value: string | number | boolean) => {
+  const parameter = (value: string | number | boolean | null) => {
     values.push(value);
     return `$${values.length}`;
   };
+  let candidates: string;
   if (search.q) {
     if (!terms) throw new Error('Search terms must be normalized before building a query');
-    conditions.push(`(p.sku_key=${parameter(terms.skuKey)} OR p.search_document @@ ${parameter(terms.tsquery)}::tsquery)`);
+    candidates = `SELECT id FROM catalog_internal.search_product_ids(
+      ${parameter(terms.skuKey)},${parameter(terms.tsquery)}::tsquery,
+      ${parameter(search.categoryId ?? null)}::uuid,${parameter(search.brandId ?? null)}::uuid,
+      ${parameter(search.featured ?? null)}::boolean,${parameter(search.after ?? null)}::text) AS ids(id)`;
+  } else {
+    if (search.categoryId) conditions.push(`p.category_id=${parameter(search.categoryId)}::uuid`);
+    if (search.brandId) conditions.push(`p.brand_id=${parameter(search.brandId)}::uuid`);
+    if (search.featured !== undefined) conditions.push(`p.is_featured=${parameter(search.featured)}`);
+    if (search.after) conditions.push(`p.id>${parameter(search.after)}`);
+    candidates = `SELECT p.id FROM public.products p JOIN public.categories c ON c.id=p.category_id
+      LEFT JOIN public.brands b ON b.id=p.brand_id WHERE ${conditions.join(' AND ')}`;
   }
-  if (search.categoryId) conditions.push(`p.category_id=${parameter(search.categoryId)}::uuid`);
-  if (search.brandId) conditions.push(`p.brand_id=${parameter(search.brandId)}::uuid`);
-  if (search.featured !== undefined) conditions.push(`p.is_featured=${parameter(search.featured)}`);
-  if (search.after) conditions.push(`p.id>${parameter(search.after)}`);
   const limit = parameter(search.limit + 1);
   return {
-    text: `WITH matching AS MATERIALIZED (
-      SELECT p.id FROM public.products p JOIN public.categories c ON c.id=p.category_id
-      LEFT JOIN public.brands b ON b.id=p.brand_id
-      WHERE ${conditions.join(' AND ')}
+    text: `WITH matching AS MATERIALIZED (${candidates}
     ), page AS (SELECT id FROM matching ORDER BY id LIMIT ${limit})
     SELECT p.id,p.sku,p.name,c.name AS category,coalesce(b.name,'') AS brand,p.presentation,
       p.price_in_cents AS "priceInCents",p.currency,p.available_quantity AS "availableQuantity",

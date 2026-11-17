@@ -91,6 +91,16 @@ describe('normalized product module', () => {
     expect((await response.json()).items).toEqual([]);
     expect((await pool.query('SELECT count(*)::int AS count FROM public.products')).rows[0].count).toBe(20002);
   });
+  it('restricts the elevated candidate helper to published catalog data and honors all filters', async () => {
+    await asRole('boticaya_catalog_app', async client => {
+      const terms = await loadProductSearchTerms(pool,'unicobuscable');
+      const result = await client.query('SELECT id FROM catalog_internal.search_product_ids($1,$2::tsquery,$3,$4,$5,$6) AS ids(id)', [terms.skuKey,terms.tsquery,categoryId,brandId,false,'volume-010000']);
+      expect(result.rows).toEqual([{ id: 'volume-012345' }]);
+      expect((await client.query('SELECT id FROM catalog_internal.search_product_ids($1,$2::tsquery,$3,$4,$5,$6) AS ids(id)', [terms.skuKey,terms.tsquery,categoryId,brandId,true,null])).rows).toEqual([]);
+    });
+    expect((await fetch(`${baseUrl}/api/products/search?limit=1&q=NORESULT`)).status).toBe(200);
+  });
+
   it('rejects oversized pages, short queries and unknown sorting parameters', async () => {
     for (const query of ['limit=99', 'q=ab', 'sort=name%3BDROP', 'featured=invalid', 'categoryId=invalid']) {
       expect((await fetch(`${baseUrl}/api/products/search?${query}`)).status).toBe(400);
@@ -149,7 +159,14 @@ describe('normalized product module', () => {
     await asRole('boticaya_catalog_app', async client => {
       const restricted = await client.query({ text: `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${query.text}`, values: query.values });
       console.info(JSON.stringify({ catalogSearchPlan: { privilegedIndexes: planIndexes(privileged.rows[0]['QUERY PLAN']), restrictedIndexes: planIndexes(restricted.rows[0]['QUERY PLAN']) } }));
-      expect(planIndexes(privileged.rows[0]['QUERY PLAN'])).toContain('products_search_gin');
+      const body = (await pool.query("SELECT prosrc FROM pg_proc WHERE oid='catalog_internal.search_product_ids(text,tsquery,uuid,uuid,boolean,text)'::regprocedure")).rows[0].prosrc as string;
+      const argumentsList = ['normalized_sku','search_terms','selected_category','selected_brand','featured_only','after_id'];
+      let innerSql = body;
+      argumentsList.forEach((name,index) => { innerSql = innerSql.replace(new RegExp(`\\b${name}\\b`,'g'), `$${index+1}`); });
+      const terms = await loadProductSearchTerms(pool,'unicobuscable');
+      const innerPlan = await pool.query({ text: `EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) ${innerSql}`, values: [terms.skuKey,terms.tsquery,null,null,null,null] });
+      console.info(JSON.stringify({ catalogInternalSearchPlan: { indexes: planIndexes(innerPlan.rows[0]['QUERY PLAN']), executionMs: innerPlan.rows[0]['QUERY PLAN'][0]['Execution Time'], restrictedExecutionMs: restricted.rows[0]['QUERY PLAN'][0]['Execution Time'] } }));
+      expect(planIndexes(innerPlan.rows[0]['QUERY PLAN'])).toContain('products_search_gin');
       expect(restricted.rows[0]['QUERY PLAN'][0]['Execution Time']).toBeGreaterThanOrEqual(0);
     });
   });

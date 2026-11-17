@@ -175,6 +175,24 @@ LANGUAGE sql STABLE PARALLEL SAFE SET search_path=pg_catalog AS $$
 $$;
 REVOKE ALL ON FUNCTION catalog_internal.search_query(TEXT) FROM PUBLIC;
 
+CREATE FUNCTION catalog_internal.search_product_ids(
+    normalized_sku TEXT, search_terms TSQUERY, selected_category UUID,
+    selected_brand UUID, featured_only BOOLEAN, after_id TEXT
+) RETURNS SETOF TEXT
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog AS $$
+    SELECT p.id FROM public.products p JOIN public.categories c ON c.id=p.category_id
+    LEFT JOIN public.brands b ON b.id=p.brand_id
+    WHERE p.status='published' AND c.is_active AND (b.id IS NULL OR b.is_active)
+      AND (p.sku_key=normalized_sku OR p.search_document @@ search_terms)
+      AND (selected_category IS NULL OR p.category_id=selected_category)
+      AND (selected_brand IS NULL OR p.brand_id=selected_brand)
+      AND (featured_only IS NULL OR p.is_featured=featured_only)
+      AND (after_id IS NULL OR p.id>after_id)
+$$;
+REVOKE ALL ON FUNCTION catalog_internal.search_product_ids(TEXT,TSQUERY,UUID,UUID,BOOLEAN,TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION catalog_internal.search_product_ids(TEXT,TSQUERY,UUID,UUID,BOOLEAN,TEXT)
+    TO boticaya_catalog_app,boticaya_catalog_editor;
+
 REVOKE ALL ON public.categories,public.brands,public.product_images FROM PUBLIC;
 DO $permissions$
 DECLARE api_role TEXT;

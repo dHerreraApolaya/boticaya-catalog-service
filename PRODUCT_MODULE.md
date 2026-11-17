@@ -33,3 +33,7 @@ Integration tests use an isolated disposable PostgreSQL instance and a separate 
 Supabase rollout must use the exact reviewed migration inside a transaction. Verify existing identity table metadata is unchanged, the expected four tables and indexes exist, role privileges/RLS are intact and there are no seeded products. ANALYZE affected catalog tables after a bulk import. For future large populated tables, separate index builds and assess CONCURRENTLY outside the schema transaction; do not reuse this initial-MVP migration blindly.
 
 References: https://www.postgresql.org/docs/current/textsearch-indexes.html and https://node-postgres.com/features/queries
+
+## Restricted-role search plan
+
+RLS prevented candidate GIN use in the initial restricted-role plan. The optimized candidate helper is a narrowly scoped SECURITY DEFINER SQL function with fixed pg_catalog search_path, fully qualified relations and no dynamic SQL. It returns only IDs of published products with active categories/brands, enforces every supplied filter, and grants execution only to the catalog reader/editor. PUBLIC execution is revoked. Its owner must be the reviewed administrative migration identity. The outer projection still runs under RLS. Do not reuse this helper for identity or private data. Tests cover draft exclusion and inspect the exact inner query plan as well as the restricted outer plan; a Function Scan in EXPLAIN alone does not prove internal index usage.
