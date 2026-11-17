@@ -6,6 +6,7 @@ import type { AddressInfo } from "node:net";
 import { Pool, type PoolClient } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
+import { trackPoolShutdown } from "./helpers/poolShutdown.js";
 import { demoCatalogSchema,seedDemoCatalog,DEMO_DESCRIPTION } from "../src/catalog-demo/demoCatalog.js";
 import { importCatalog } from "../src/catalog-import/importCatalog.js";
 import { productIdentity } from "../src/catalog-import/dataset.js";
@@ -21,6 +22,7 @@ if (!url || !new URL(url).pathname.endsWith("_test"))
 const database = `boticaya_products_${randomUUID().replaceAll("-", "")}_test`;
 const admin = new Pool({ connectionString: url });
 let pool: Pool;
+let closePool: (() => Promise<void>) | undefined;
 let server: Server;
 let baseUrl: string;
 let created = false;
@@ -198,6 +200,7 @@ beforeAll(async () => {
   const connection = new URL(url!);
   connection.pathname = `/${database}`;
   pool = new Pool({ connectionString: connection.href });
+  closePool = trackPoolShutdown(pool);
   const initial = await readFile(
     new URL("../sql/migrations/002-catalog-readonly.sql", import.meta.url),
     "utf8",
@@ -241,8 +244,8 @@ afterAll(async () => {
     await new Promise<void>((resolve, reject) =>
       server.close((error) => (error ? reject(error) : resolve())),
     );
-  await pool?.end();
-  if (created) await admin.query(`DROP DATABASE "${database}" WITH (FORCE)`);
+  await closePool?.();
+  if (created) await admin.query(`DROP DATABASE "${database}"`);
   if (editorCreated) await admin.query("DROP ROLE boticaya_catalog_editor");
   if (readerCreated) await admin.query("DROP ROLE boticaya_catalog_app");
   await admin.end();

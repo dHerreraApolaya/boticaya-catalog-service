@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { Pool } from "pg";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { verifyCatalogReader } from "../src/database/readerCheck.js";
+import { trackPoolShutdown } from "./helpers/poolShutdown.js";
 
 const url = process.env.BOTICAYA_TEST_DATABASE_URL;
 if (!url || !new URL(url).pathname.endsWith("_test"))
@@ -12,6 +13,7 @@ const database = `catalog_reader_${suffix}_test`;
 const reader = `reader_${suffix}`;
 const admin = new Pool({ connectionString: url });
 let pool: Pool;
+let closePool: (() => Promise<void>) | undefined;
 let created = false;
 let readerCreated = false;
 let appCreated = false;
@@ -27,6 +29,7 @@ beforeAll(async () => {
   const connection = new URL(url!);
   connection.pathname = `/${database}`;
   pool = new Pool({ connectionString: connection.href });
+  closePool = trackPoolShutdown(pool);
   await pool.query(await readFile(new URL("../sql/migrations/002-catalog-readonly.sql", import.meta.url), "utf8"));
   appCreated = true;
   await pool.query(await readFile(new URL("../sql/migrations/003-product-module.sql", import.meta.url), "utf8"));
@@ -38,8 +41,8 @@ beforeAll(async () => {
 }, 30000);
 
 afterAll(async () => {
-  await pool?.end();
-  if (created) await admin.query(`DROP DATABASE "${database}" WITH (FORCE)`);
+  await closePool?.();
+  if (created) await admin.query(`DROP DATABASE "${database}"`);
   if (readerCreated) await admin.query(`DROP ROLE "${reader}"`);
   if (editorCreated) await admin.query("DROP ROLE boticaya_catalog_editor");
   if (appCreated) await admin.query("DROP ROLE boticaya_catalog_app");
