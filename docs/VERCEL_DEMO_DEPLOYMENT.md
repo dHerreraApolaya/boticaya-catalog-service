@@ -1,6 +1,6 @@
 # Read-only catalog demo on Vercel
 
-Status: prepared, not deployed. Depends on catalog integration PR #6. No paid services are authorized. The full dependency audit is a release blocker: GHSA-fc5q-39xc-vjpf affects the development-only picomatch 4.0.7; there is no published fix as of 2026-11-17. Do not replace the required audit with a production-only audit or deploy around the required GitHub checks. Any exception needs a separately reviewed PR with an owner, reason and expiry under CONTRIBUTING.md.
+Status: deployment preparation on pre-develop, based on merged catalog integration PR #6. No paid services are authorized. The owner authorized a narrow temporary exception on 2026-11-17 for GHSA-fc5q-39xc-vjpf in development-only picomatch 4.0.7; see [the canonical exception](DEMO_SECURITY_EXCEPTION.md). Complete and runtime reports remain mandatory; main/develop do not accept this exception.
 
 ## Contract and architecture
 
@@ -32,7 +32,7 @@ Do not upload .env or .env.maintenance, administrative passwords, Supabase servi
 
 ## Release gates and checks
 
-1. Merge reviewed catalog integration, then review this deployment change against the current base. Pass typecheck, unit tests, disposable PostgreSQL integration coverage, build, filename/Gitleaks scans and the complete dependency audit.
+1. Merge reviewed catalog integration, then review this deployment change against the current base. Pass typecheck, unit tests, disposable PostgreSQL integration coverage, build, filename/Gitleaks scans and the complete/runtime dependency audit under the explicitly authorized demo policy.
 2. Confirm account plan eligibility and zero-cost features in the dashboard. Enable only verified included DDoS/custom firewall controls. Assess rate limiting before making the API public; do not claim a distributed limit exists in this code. No per-process IP map is used because serverless instances cannot enforce a shared quota.
 3. Verify the reader credential and inline CA through secure server configuration. Never copy maintenance credentials. No migrations or demo reload are needed: Supabase already holds 500 fictional products. No production or identity tables are changed.
 4. Verify native Express entry discovery with a Vercel build and deployment preview. Local tsc is not evidence of Vercel bundling. Ensure the chosen entry is root index.ts, not src/server.ts.
@@ -44,7 +44,7 @@ Do not upload .env or .env.maintenance, administrative passwords, Supabase servi
 
 - Typecheck, 98 unit/boundary tests, build, sensitive-file guard and Gitleaks directory scan passed.
 - Disposable PostgreSQL integration coverage: 151 tests passed; statements/lines/functions 100%, branches 98.7%. Supabase was not used for tests.
-- Full dependency audit fails on the existing high-severity picomatch advisory. This is not suppressed.
+- Complete audit reports the high-severity picomatch advisory. Only the documented temporary development exception is authorized on pre-develop.
 - Vercel-native build, public deployment, frontend origin, account eligibility and platform firewall configuration are not yet verified.
 
 References: https://vercel.com/docs/frameworks/backend/express ; https://vercel.com/kb/guide/connection-pooling-with-functions ; https://supabase.com/docs/guides/database/connecting-to-postgres ; https://vercel.com/docs/environment-variables/sensitive-environment-variables ; https://vercel.com/docs/vercel-firewall/vercel-waf/usage-and-pricing ; https://vercel.com/legal/terms .

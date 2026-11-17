@@ -2,7 +2,7 @@ name: Backend quality
 on:
   pull_request:
   push:
-    branches: [main, develop]
+    branches: [main, develop, pre-develop]
 permissions:
   contents: read
 jobs:
