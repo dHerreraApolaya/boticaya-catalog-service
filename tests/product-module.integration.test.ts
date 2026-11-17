@@ -6,6 +6,8 @@ import type { AddressInfo } from "node:net";
 import { Pool, type PoolClient } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
+import { importCatalog } from "../src/catalog-import/importCatalog.js";
+import { productIdentity } from "../src/catalog-import/dataset.js";
 import {
   buildProductSearchQuery,
   loadProductSearchTerms,
@@ -24,6 +26,47 @@ let readerCreated = false;
 let editorCreated = false;
 let categoryId: string;
 let brandId: string;
+
+const importFixture = {
+  schemaVersion: 1,
+  source: {
+    namespace: "test-import", country: "PE", publisher: "Fictional test publisher",
+    url: "https://example.com/catalog", retrievedAt: "2026-11-17T12:00:00Z",
+    reuse: { status: "confirmed", licenseOrPermission: "Fictional test permission",
+      evidenceUrl: "https://example.com/permission", reviewedBy: "Test", reviewedAt: "2026-11-17" },
+  },
+  products: [
+    { externalId: "test-1", name: "Producto ficticio de importación", category: "Importaciones de prueba",
+      brand: "Marca ficticia", presentation: "Caja", requiresPrescription: true, keywords: ["prueba"] },
+    { externalId: "test-2", name: "Otro producto ficticio", category: "Importaciones de prueba",
+      brand: "Marca ficticia", presentation: "Frasco", requiresPrescription: false, keywords: [] },
+    { externalId: "test-3", name: "Sin marca", category: "Importaciones de prueba",
+      brand: null, presentation: "Frasco", requiresPrescription: false, keywords: [] },
+  ],
+};
+
+it("imports atomically as drafts and preserves existing commercial data on rerun", async () => {
+  expect(await importCatalog(pool, importFixture)).toEqual({ total: 3, inserted: 3, skipped: 0 });
+  const id = productIdentity("test-import", "test-1").id;
+  const original = await pool.query("SELECT status,available_quantity,price_in_cents FROM public.products WHERE id=$1", [id]);
+  expect(original.rows[0]).toEqual({ status: "draft", available_quantity: 0, price_in_cents: 0 });
+  await pool.query("UPDATE public.products SET price_in_cents=500,available_quantity=10 WHERE id=$1", [id]);
+  expect(await importCatalog(pool, importFixture)).toEqual({ total: 3, inserted: 0, skipped: 3 });
+  const preserved = await pool.query("SELECT price_in_cents,available_quantity FROM public.products WHERE id=$1", [id]);
+  expect(preserved.rows[0]).toEqual({ price_in_cents: 500, available_quantity: 10 });
+  await pool.query("DELETE FROM public.products WHERE id=ANY($1::text[])",
+    [importFixture.products.map((product) => productIdentity("test-import", product.externalId).id)]);
+});
+
+it("rolls back earlier products and directories when a later insert fails", async () => {
+  const bad = { ...importFixture, source: { ...importFixture.source, namespace: "rollback-import" },
+    products: [ { ...importFixture.products[0]!, category: "Rollback directory", brand: null },
+      { ...importFixture.products[1]!, category: "💊" } ] };
+  await expect(importCatalog(pool, bad)).rejects.toThrow();
+  const id = productIdentity("rollback-import", "test-1").id;
+  expect((await pool.query("SELECT 1 FROM public.products WHERE id=$1", [id])).rowCount).toBe(0);
+  expect((await pool.query("SELECT 1 FROM public.categories WHERE name='Rollback directory'")).rowCount).toBe(0);
+});
 
 beforeAll(async () => {
   const roles = await admin.query(
