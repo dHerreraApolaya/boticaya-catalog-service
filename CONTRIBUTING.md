@@ -9,3 +9,7 @@ Install local Git hooks with `git config core.hooksPath .githooks`. Install the 
 Main must use PRs, one eligible independent approval, stale approval dismissal, code-owner review, resolved discussions, current base and required passing checks. Block force pushes and deletion with no routine bypass. CODEOWNERS identifies ownership but does not itself grant repository access. If the owner is also the author, another eligible reviewer must review sensitive changes. Add designated team reviewers through a separate authorized access change.
 
 Required checks after a successful initial run: Express API and PostgreSQL, Secret scan, Dependency audit. Do not require nonexistent checks. Exceptions need a reviewed PR with owner, reason and expiry; do not broadly suppress scanners.
+
+## Verified rollout — 2026-11-17
+
+Main protection is active in GitHub ruleset 27438507, with no bypass actors and the three required GitHub Actions checks verified passing. Repository secret protection, push protection, dependency graph, Dependabot alerts/security updates, malware alerts and private vulnerability reporting are enabled. CODEOWNERS is advisory until a suitable independent ownership group is assigned; code-owner approval is not enforced by the current ruleset. Independent PR approval is mandatory. The versioned ruleset is a snapshot, not an automatic settings deployment.
