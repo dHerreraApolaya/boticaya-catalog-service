@@ -9,3 +9,10 @@ data
 sql
 scripts
 .agents
+dist
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/*.jks
+**/*.keystore

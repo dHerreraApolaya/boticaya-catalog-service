@@ -1,6 +1,6 @@
 # Read-only catalog demo on Vercel
 
-Status: deployment preparation on pre-develop, based on merged catalog integration PR #6. No paid services are authorized. The owner authorized a narrow temporary exception on 2026-11-17 for GHSA-fc5q-39xc-vjpf in development-only picomatch 4.0.7; see [the canonical exception](DEMO_SECURITY_EXCEPTION.md). Complete and runtime reports remain mandatory; main/develop do not accept this exception.
+Status: deployed from pre-develop on 2026-11-17, based on merged catalog integration PR #6. No paid services are authorized. The owner authorized a narrow temporary exception on 2026-11-17 for GHSA-fc5q-39xc-vjpf in development-only picomatch 4.0.7; see [the canonical exception](DEMO_SECURITY_EXCEPTION.md). Complete and runtime reports remain mandatory; main/develop do not accept this exception.
 
 ## Contract and architecture
 
@@ -45,6 +45,11 @@ Do not upload .env or .env.maintenance, administrative passwords, Supabase servi
 - Typecheck, 98 unit/boundary tests, build, sensitive-file guard and Gitleaks directory scan passed.
 - Disposable PostgreSQL integration coverage: 151 tests passed; statements/lines/functions 100%, branches 98.7%. Supabase was not used for tests.
 - Complete audit reports the high-severity picomatch advisory. Only the documented temporary development exception is authorized on pre-develop.
-- Vercel-native build, public deployment, frontend origin, account eligibility and platform firewall configuration are not yet verified.
+- Vercel native build passed: root index Express function, iad1, approximately 1.28 MB. Deployment dpl_AUEMp4e7URbARcpmNas1FriLJMBa; runtime source commit 06e3030.
+- Public health returned demo-read-only. Public featured catalog returned total 11, eight items on page one, two pages, with fictional demo IDs. The runtime reader readiness verification succeeded on real requests.
+- Transaction pooler port 6543, authorized TLS and read-only catalog role were verified before server configuration was securely transferred to Vercel Secrets. No administrative password was transferred.
+- Quality and Security GitHub runs 44185343314 and 44185343299 passed. The owner confirmed personal/educational non-commercial eligibility; no paid options were enabled. Platform firewall custom rules/rate limiting have not been configured or claimed.
+- Production origin: https://boticaya-catalog-service.vercel.app ; inspector: https://vercel.com/personal-41c1/boticaya-catalog-service/AUEMp4e7URbARcpmNas1FriLJMBa .
+- Initial direct terminal probes timed out from the local network. Browser requests to the public health and catalog endpoints succeeded; no TLS validation was bypassed to work around connectivity.
 
 References: https://vercel.com/docs/frameworks/backend/express ; https://vercel.com/kb/guide/connection-pooling-with-functions ; https://supabase.com/docs/guides/database/connecting-to-postgres ; https://vercel.com/docs/environment-variables/sensitive-environment-variables ; https://vercel.com/docs/vercel-firewall/vercel-waf/usage-and-pricing ; https://vercel.com/legal/terms .
