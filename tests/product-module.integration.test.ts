@@ -363,7 +363,7 @@ describe("normalized product module", () => {
       argumentsList.forEach((name, index) => {
         innerSql = innerSql.replace(
           new RegExp(`\\b${name}\\b`, "g"),
-          `$${index + 1}`,
+          `($${index + 1}::${['text', 'tsquery', 'uuid', 'uuid', 'boolean', 'text'][index]})`,
         );
       });
       const terms = await loadProductSearchTerms(pool, "unicobuscable");
