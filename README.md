@@ -144,3 +144,9 @@ This repository owns the Express catalog, inventory, local orders, SQL and API t
 ## Supabase development setup
 
 See [SUPABASE.md](SUPABASE.md). Run `pnpm verify:database` to verify connectivity, SELECT permission and catalog columns without retrieving rows or changing the schema.
+
+For repeatable, insert-only catalog loading and recovery, see [CATALOG_IMPORT.md](CATALOG_IMPORT.md).
+
+The API-backed web catalog uses [numbered typo-tolerant search](CATALOG_API.md) and a [restricted runtime reader](CATALOG_RUNTIME.md). See [development integration evidence](CATALOG_INTEGRATION_DEPLOYMENT.md) and [remaining business inputs](E2E_READINESS.md) before importing or publishing real products.
+
+For the explicitly authorized 500-product fictional demonstration, use the separate [development demo seed](DEMO_CATALOG.md). It does not require or claim a DIGEMID reuse license.

@@ -2,6 +2,8 @@ import express, { type ErrorRequestHandler } from "express";
 import { parseProductSearch } from "./products/productSearch.schema.js";
 import { createProductSearch } from "./products/productSearch.service.js";
 import { createPgProductSearchRepository } from "./products/productSearch.repository.js";
+import { parseProductCatalog } from "./products/productCatalog.schema.js";
+import { createPgProductCatalogRepository } from "./products/productCatalog.repository.js";
 import type { Pool } from "pg";
 import { getInventory, getProducts } from "./products/product.repository.js";
 import { idempotencyKeySchema, orderSchema } from "./orders/order.schema.js";
@@ -18,6 +20,18 @@ export function createApp(
   const searchProducts = createProductSearch(
     createPgProductSearchRepository(pool),
   );
+  const catalog = createPgProductCatalogRepository(pool);
+  app.get("/api/categories", async (_request, response) => {
+    response.json(await catalog.categories());
+  });
+  app.get("/api/products/catalog", async (request, response) => {
+    const search = parseProductCatalog(request.query);
+    if (!search.success) {
+      response.status(400).json({ error: "invalid_search",message: "Revisa los parámetros de búsqueda." });
+      return;
+    }
+    response.json(await catalog.find(search.data));
+  });
   app.get("/api/products/search", async (request, response) => {
     const search = parseProductSearch(request.query);
     if (!search.success) {

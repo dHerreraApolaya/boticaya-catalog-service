@@ -6,6 +6,11 @@ import type { AddressInfo } from "node:net";
 import { Pool, type PoolClient } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
+import { trackPoolShutdown } from "./helpers/poolShutdown.js";
+import { demoCatalogSchema,seedDemoCatalog,DEMO_DESCRIPTION } from "../src/catalog-demo/demoCatalog.js";
+import { importCatalog } from "../src/catalog-import/importCatalog.js";
+import { productIdentity } from "../src/catalog-import/dataset.js";
+import { buildProductCatalogQuery,createPgProductCatalogRepository } from "../src/products/productCatalog.repository.js";
 import {
   buildProductSearchQuery,
   loadProductSearchTerms,
@@ -17,6 +22,7 @@ if (!url || !new URL(url).pathname.endsWith("_test"))
 const database = `boticaya_products_${randomUUID().replaceAll("-", "")}_test`;
 const admin = new Pool({ connectionString: url });
 let pool: Pool;
+let closePool: (() => Promise<void>) | undefined;
 let server: Server;
 let baseUrl: string;
 let created = false;
@@ -24,6 +30,162 @@ let readerCreated = false;
 let editorCreated = false;
 let categoryId: string;
 let brandId: string;
+
+const importFixture = {
+  schemaVersion: 1,
+  source: {
+    namespace: "test-import", country: "PE", publisher: "Fictional test publisher",
+    url: "https://example.com/catalog", retrievedAt: "2026-11-17T12:00:00Z",
+    reuse: { status: "confirmed", licenseOrPermission: "Fictional test permission",
+      evidenceUrl: "https://example.com/permission", reviewedBy: "Test", reviewedAt: "2026-11-17" },
+  },
+  products: [
+    { externalId: "test-1", name: "Producto ficticio de importación", category: "Importaciones de prueba",
+      brand: "Marca ficticia", presentation: "Caja", requiresPrescription: true, keywords: ["prueba"] },
+    { externalId: "test-2", name: "Otro producto ficticio", category: "Importaciones de prueba",
+      brand: "Marca ficticia", presentation: "Frasco", requiresPrescription: false, keywords: [] },
+    { externalId: "test-3", name: "Sin marca", category: "Importaciones de prueba",
+      brand: null, presentation: "Frasco", requiresPrescription: false, keywords: [] },
+  ],
+};
+
+async function withCatalogFixture(run: (firstCategory: string,secondCategory: string) => Promise<void>) {
+  const firstCategory = randomUUID();
+  const secondCategory = randomUUID();
+  await pool.query("INSERT INTO public.categories(id,name) VALUES ($1,'Categoría API primera'),($2,'Categoría API segunda')", [firstCategory,secondCategory]);
+  await pool.query(`INSERT INTO public.products(id,sku,name,category_id,presentation,price_in_cents,available_quantity,is_featured,status)
+    VALUES ('api-cat-1','API-CAT-1','Paracetamol 500 mg',$1,'Caja',100,5,true,'published'),
+      ('api-cat-2','API-CAT-2','Ibuprofeno 400 mg',$2,'Caja',200,0,false,'published'),
+      ('api-cat-3','API-CAT-3','Paracetamol oculto',$1,'Caja',100,5,true,'draft'),
+      ('api-cat-4','API-CAT-4','Solución salina',$1,'Frasco',100,5,false,'published')`,[firstCategory,secondCategory]);
+  try {
+    await run(firstCategory,secondCategory);
+  } finally {
+    await pool.query("DELETE FROM public.products WHERE id=ANY($1::text[])", [["api-cat-1","api-cat-2","api-cat-3","api-cat-4"]]);
+    await pool.query("DELETE FROM public.categories WHERE id=ANY($1::uuid[])", [[firstCategory,secondCategory]]);
+  }
+}
+
+describe("numbered catalog integration", () => {
+  it("returns exact totals for a page and empty out-of-range pages with category OR filters", async () => withCatalogFixture(async (first,second) => {
+    const url = `${baseUrl}/api/products/catalog?categoryIds=${first},${second}&pageSize=2`;
+    const firstPage = await fetch(url);
+    expect(firstPage.status).toBe(200);
+    const body = await firstPage.json();
+    expect(body).toMatchObject({ page: 1,total: 3,totalPages: 2 });
+    expect(body.items.map((item: { id: string }) => item.id)).toEqual(["api-cat-1","api-cat-2"]);
+    expect(body.items[0]).toMatchObject({ categoryId: first,brandId: null,currency: "PEN",image: null });
+    expect(await (await fetch(`${url}&page=3`)).json()).toEqual({ items: [],page: 3,total: 3,totalPages: 2 });
+    expect(await (await fetch(`${url}&featured=true&inStock=true`)).json()).toMatchObject({ total: 1,totalPages: 1 });
+    expect(await (await fetch(`${url}&inStock=false`)).json()).toMatchObject({ total: 1 });
+  }));
+  it("handles accents, SKU, prefixes and spelling mistakes without publishing drafts", async () => withCatalogFixture(async (category) => {
+    const catalog = createPgProductCatalogRepository(pool);
+    for (const q of ["paracetamol","paraceta","paracatamol","API-CAT-1"]) {
+      const result = await catalog.find({ q,categoryIds: [category],page: 1,pageSize: 12 });
+      expect(result.items.map((item) => item.id)).toEqual(["api-cat-1"]);
+    }
+    expect((await catalog.find({ q: "solucion",categoryIds: [category],page: 1,pageSize: 12 })).items.map((item) => item.id)).toEqual(["api-cat-4"]);
+    expect((await catalog.find({ q: "%%_",categoryIds: [category],page: 1,pageSize: 12 })).total).toBe(0);
+    expect((await catalog.find({ q: "\\\\\\",categoryIds: [category],page: 1,pageSize: 12 })).total).toBe(0);
+  }));
+  it("enforces catalog visibility with the restricted reader and helper permissions", async () => withCatalogFixture(async (category) => {
+    await asRole("boticaya_catalog_app", async (client) => {
+      const result = await client.query(buildProductCatalogQuery({ categoryIds: [category],page: 1,pageSize: 12 }));
+      expect(result.rows[0].total).toBe(2);
+      await client.query("SET pg_trgm.word_similarity_threshold='0.99'");
+      const typo = await client.query(buildProductCatalogQuery({ q: "paracatamol",categoryIds: [category],page: 1,pageSize: 12 }));
+      expect(typo.rows[0].total).toBe(1);
+      await client.query("RESET pg_trgm.word_similarity_threshold");
+    });
+    await pool.query("UPDATE public.categories SET is_active=false WHERE id=$1", [category]);
+    expect((await createPgProductCatalogRepository(pool).find({ categoryIds: [category],page: 1,pageSize: 12 })).total).toBe(0);
+    const categories = await fetch(`${baseUrl}/api/categories`);
+    expect(categories.status).toBe(200);
+    expect((await categories.json()).some((item: { id: string }) => item.id === category)).toBe(false);
+    expect((await pool.query("SELECT has_function_privilege('public','catalog_internal.catalog_product_ids(text,uuid[],boolean,boolean)','EXECUTE') AS allowed")).rows[0].allowed).toBe(false);
+  }));
+  it("rejects offset abuse and malformed filters and keeps injection text as data", async () => {
+    for (const query of ["page=1001","categoryIds=bad","inStock=yes","q=ab","pageSize=51"]) {
+      expect((await fetch(`${baseUrl}/api/products/catalog?${query}`)).status).toBe(400);
+    }
+    const q = "x');DROP TABLE products;--";
+    const response = await fetch(`${baseUrl}/api/products/catalog?q=${encodeURIComponent(q)}`);
+    expect(response.status).toBe(200);
+    expect((await response.json()).total).toBe(0);
+    expect((await pool.query("SELECT count(*)::int AS total FROM public.products")).rows[0].total).toBe(20002);
+  });
+  it("measures numbered and typo search on the full fixture without forcing indexes", async () => {
+    const catalog = createPgProductCatalogRepository(pool);
+    expect((await catalog.find({ q: "unicobuscablx",page: 1,pageSize: 12 })).total).toBe(1);
+    const query = buildProductCatalogQuery({ q: "unicobuscablx",page: 1,pageSize: 12 });
+    let restrictedMs = 0;
+    await asRole("boticaya_catalog_app", async (client) => {
+      const result = await client.query({ text: `EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) ${query.text}`,values: query.values });
+      restrictedMs = result.rows[0]["QUERY PLAN"][0]["Execution Time"];
+    });
+    const body = (await pool.query("SELECT prosrc FROM pg_proc WHERE oid='catalog_internal.catalog_product_ids(text,uuid[],boolean,boolean)'::regprocedure")).rows[0].prosrc as string;
+    let sql = body;
+    ["normalized_query","selected_categories","featured_only","in_stock_only"].forEach((name,index) => {
+      sql = sql.replace(new RegExp(`\\b${name}\\b`,"g"),`($${index+1}::${["text","uuid[]","boolean","boolean"][index]})`);
+    });
+    const inner = await pool.query({ text: `EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) ${sql}`,values: ["unicobuscablx",null,null,null] });
+    const indexes = planIndexes(inner.rows[0]["QUERY PLAN"]);
+    expect(indexes).toContain("products_search_text_gin");
+    console.info(JSON.stringify({ numberedCatalogPlan: { records: 20002, restrictedMs,
+      internalMs: inner.rows[0]["QUERY PLAN"][0]["Execution Time"],indexes } }));
+  });
+});
+
+describe("owned demo catalog loading", () => {
+  it("publishes demo products, is repeatable, preserves edits and rolls back conflicts", async () => {
+    const dataset = demoCatalogSchema.parse(JSON.parse(await readFile(new URL("../data/catalog/boticaya-demo-v1.json",import.meta.url),"utf8")));
+    try {
+      expect(await seedDemoCatalog(pool,dataset)).toEqual({ total: 500,inserted: 500,skipped: 0 });
+      const id = dataset.products[0]!.id;
+      const catalog = createPgProductCatalogRepository(pool);
+      expect((await catalog.find({ q: "DEMO",page: 1,pageSize: 12 })).total).toBe(500);
+      await pool.query("UPDATE public.products SET price_in_cents=999,available_quantity=3 WHERE id=$1",[id]);
+      expect(await seedDemoCatalog(pool,dataset)).toEqual({ total: 500,inserted: 0,skipped: 500 });
+      expect((await pool.query("SELECT price_in_cents,available_quantity FROM public.products WHERE id=$1",[id])).rows[0]).toEqual({ price_in_cents: 999,available_quantity: 3 });
+      await asRole("boticaya_catalog_app", async (client) => {
+        expect((await client.query(buildProductCatalogQuery({ q: "DEMO",page: 1,pageSize: 12 }))).rows[0].total).toBe(500);
+      });
+      await pool.query("UPDATE public.products SET description='Not a demo-owned row' WHERE id=$1",[id]);
+      await expect(seedDemoCatalog(pool,dataset)).rejects.toThrow("Demo identity conflict");
+      await pool.query("UPDATE public.products SET description=$2 WHERE id=$1",[id,DEMO_DESCRIPTION]);
+      const category = (await pool.query("SELECT category_id FROM public.products WHERE id=$1",[id])).rows[0].category_id;
+      await pool.query("UPDATE public.categories SET is_active=false WHERE id=$1",[category]);
+      await expect(seedDemoCatalog(pool,dataset)).rejects.toThrow("Inactive demo directory");
+      await pool.query("UPDATE public.categories SET is_active=true WHERE id=$1",[category]);
+    } finally {
+      await pool.query("DELETE FROM public.products WHERE id=ANY($1::text[])",[dataset.products.map((p) => p.id)]);
+    }
+  });
+});
+
+it("imports atomically as drafts and preserves existing commercial data on rerun", async () => {
+  expect(await importCatalog(pool, importFixture)).toEqual({ total: 3, inserted: 3, skipped: 0 });
+  const id = productIdentity("test-import", "test-1").id;
+  const original = await pool.query("SELECT status,available_quantity,price_in_cents FROM public.products WHERE id=$1", [id]);
+  expect(original.rows[0]).toEqual({ status: "draft", available_quantity: 0, price_in_cents: 0 });
+  await pool.query("UPDATE public.products SET price_in_cents=500,available_quantity=10 WHERE id=$1", [id]);
+  expect(await importCatalog(pool, importFixture)).toEqual({ total: 3, inserted: 0, skipped: 3 });
+  const preserved = await pool.query("SELECT price_in_cents,available_quantity FROM public.products WHERE id=$1", [id]);
+  expect(preserved.rows[0]).toEqual({ price_in_cents: 500, available_quantity: 10 });
+  await pool.query("DELETE FROM public.products WHERE id=ANY($1::text[])",
+    [importFixture.products.map((product) => productIdentity("test-import", product.externalId).id)]);
+});
+
+it("rolls back earlier products and directories when a later insert fails", async () => {
+  const bad = { ...importFixture, source: { ...importFixture.source, namespace: "rollback-import" },
+    products: [ { ...importFixture.products[0]!, category: "Rollback directory", brand: null },
+      { ...importFixture.products[1]!, category: "💊" } ] };
+  await expect(importCatalog(pool, bad)).rejects.toThrow();
+  const id = productIdentity("rollback-import", "test-1").id;
+  expect((await pool.query("SELECT 1 FROM public.products WHERE id=$1", [id])).rowCount).toBe(0);
+  expect((await pool.query("SELECT 1 FROM public.categories WHERE name='Rollback directory'")).rowCount).toBe(0);
+});
 
 beforeAll(async () => {
   const roles = await admin.query(
@@ -38,6 +200,7 @@ beforeAll(async () => {
   const connection = new URL(url!);
   connection.pathname = `/${database}`;
   pool = new Pool({ connectionString: connection.href });
+  closePool = trackPoolShutdown(pool);
   const initial = await readFile(
     new URL("../sql/migrations/002-catalog-readonly.sql", import.meta.url),
     "utf8",
@@ -53,6 +216,7 @@ beforeAll(async () => {
   );
   await pool.query(migration);
   editorCreated = true;
+  await pool.query(await readFile(new URL("../sql/migrations/004-catalog-numbered-search.sql", import.meta.url),"utf8"));
   categoryId = (await pool.query("SELECT id FROM public.categories LIMIT 1"))
     .rows[0].id;
   brandId = (await pool.query("SELECT id FROM public.brands LIMIT 1")).rows[0]
@@ -80,8 +244,8 @@ afterAll(async () => {
     await new Promise<void>((resolve, reject) =>
       server.close((error) => (error ? reject(error) : resolve())),
     );
-  await pool?.end();
-  if (created) await admin.query(`DROP DATABASE "${database}" WITH (FORCE)`);
+  await closePool?.();
+  if (created) await admin.query(`DROP DATABASE "${database}"`);
   if (editorCreated) await admin.query("DROP ROLE boticaya_catalog_editor");
   if (readerCreated) await admin.query("DROP ROLE boticaya_catalog_app");
   await admin.end();

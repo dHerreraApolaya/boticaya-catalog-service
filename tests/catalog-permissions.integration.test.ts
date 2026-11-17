@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { Pool, type PoolClient } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { trackPoolShutdown } from "./helpers/poolShutdown.js";
 
 const databaseUrl = process.env.BOTICAYA_TEST_DATABASE_URL;
 if (!databaseUrl || !new URL(databaseUrl).pathname.endsWith("_test")) {
@@ -12,6 +13,7 @@ if (!databaseUrl || !new URL(databaseUrl).pathname.endsWith("_test")) {
 const database = `boticaya_catalog_${randomUUID().replaceAll("-", "")}_test`;
 const admin = new Pool({ connectionString: databaseUrl });
 let pool: Pool;
+let closePool: (() => Promise<void>) | undefined;
 let created = false;
 let roleCreated = false;
 const createdApiRoles: string[] = [];
@@ -34,6 +36,7 @@ beforeAll(async () => {
   const url = new URL(databaseUrl!);
   url.pathname = `/${database}`;
   pool = new Pool({ connectionString: url.href });
+  closePool = trackPoolShutdown(pool);
   for (const role of apiRoles) {
     const exists = await admin.query(
       "SELECT 1 FROM pg_roles WHERE rolname=$1",
@@ -56,8 +59,8 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await pool?.end();
-  if (created) await admin.query(`DROP DATABASE "${database}" WITH (FORCE)`);
+  await closePool?.();
+  if (created) await admin.query(`DROP DATABASE "${database}"`);
   if (roleCreated) await admin.query("DROP ROLE boticaya_catalog_app");
   for (const role of createdApiRoles) await admin.query(`DROP ROLE "${role}"`);
   await admin.end();
