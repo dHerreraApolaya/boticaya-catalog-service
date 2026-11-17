@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import { importCatalog } from "../src/catalog-import/importCatalog.js";
 import { productIdentity } from "../src/catalog-import/dataset.js";
+import { buildProductCatalogQuery,createPgProductCatalogRepository } from "../src/products/productCatalog.repository.js";
 import {
   buildProductSearchQuery,
   loadProductSearchTerms,
@@ -44,6 +45,94 @@ const importFixture = {
       brand: null, presentation: "Frasco", requiresPrescription: false, keywords: [] },
   ],
 };
+
+async function withCatalogFixture(run: (firstCategory: string,secondCategory: string) => Promise<void>) {
+  const firstCategory = randomUUID();
+  const secondCategory = randomUUID();
+  await pool.query("INSERT INTO public.categories(id,name) VALUES ($1,'Categoría API primera'),($2,'Categoría API segunda')", [firstCategory,secondCategory]);
+  await pool.query(`INSERT INTO public.products(id,sku,name,category_id,presentation,price_in_cents,available_quantity,is_featured,status)
+    VALUES ('api-cat-1','API-CAT-1','Paracetamol 500 mg',$1,'Caja',100,5,true,'published'),
+      ('api-cat-2','API-CAT-2','Ibuprofeno 400 mg',$2,'Caja',200,0,false,'published'),
+      ('api-cat-3','API-CAT-3','Paracetamol oculto',$1,'Caja',100,5,true,'draft'),
+      ('api-cat-4','API-CAT-4','Solución salina',$1,'Frasco',100,5,false,'published')`,[firstCategory,secondCategory]);
+  try {
+    await run(firstCategory,secondCategory);
+  } finally {
+    await pool.query("DELETE FROM public.products WHERE id=ANY($1::text[])", [["api-cat-1","api-cat-2","api-cat-3","api-cat-4"]]);
+    await pool.query("DELETE FROM public.categories WHERE id=ANY($1::uuid[])", [[firstCategory,secondCategory]]);
+  }
+}
+
+describe("numbered catalog integration", () => {
+  it("returns exact totals for a page and empty out-of-range pages with category OR filters", async () => withCatalogFixture(async (first,second) => {
+    const url = `${baseUrl}/api/products/catalog?categoryIds=${first},${second}&pageSize=2`;
+    const firstPage = await fetch(url);
+    expect(firstPage.status).toBe(200);
+    const body = await firstPage.json();
+    expect(body).toMatchObject({ page: 1,total: 3,totalPages: 2 });
+    expect(body.items.map((item: { id: string }) => item.id)).toEqual(["api-cat-1","api-cat-2"]);
+    expect(body.items[0]).toMatchObject({ categoryId: first,brandId: null,currency: "PEN",image: null });
+    expect(await (await fetch(`${url}&page=3`)).json()).toEqual({ items: [],page: 3,total: 3,totalPages: 2 });
+    expect(await (await fetch(`${url}&featured=true&inStock=true`)).json()).toMatchObject({ total: 1,totalPages: 1 });
+    expect(await (await fetch(`${url}&inStock=false`)).json()).toMatchObject({ total: 1 });
+  }));
+  it("handles accents, SKU, prefixes and spelling mistakes without publishing drafts", async () => withCatalogFixture(async (category) => {
+    const catalog = createPgProductCatalogRepository(pool);
+    for (const q of ["paracetamol","paraceta","paracatamol","API-CAT-1"]) {
+      const result = await catalog.find({ q,categoryIds: [category],page: 1,pageSize: 12 });
+      expect(result.items.map((item) => item.id)).toEqual(["api-cat-1"]);
+    }
+    expect((await catalog.find({ q: "solucion",categoryIds: [category],page: 1,pageSize: 12 })).items.map((item) => item.id)).toEqual(["api-cat-4"]);
+    expect((await catalog.find({ q: "%%_",categoryIds: [category],page: 1,pageSize: 12 })).total).toBe(0);
+    expect((await catalog.find({ q: "\\\\\\",categoryIds: [category],page: 1,pageSize: 12 })).total).toBe(0);
+  }));
+  it("enforces catalog visibility with the restricted reader and helper permissions", async () => withCatalogFixture(async (category) => {
+    await asRole("boticaya_catalog_app", async (client) => {
+      const result = await client.query(buildProductCatalogQuery({ categoryIds: [category],page: 1,pageSize: 12 }));
+      expect(result.rows[0].total).toBe(2);
+      await client.query("SET pg_trgm.word_similarity_threshold='0.99'");
+      const typo = await client.query(buildProductCatalogQuery({ q: "paracatamol",categoryIds: [category],page: 1,pageSize: 12 }));
+      expect(typo.rows[0].total).toBe(1);
+      await client.query("RESET pg_trgm.word_similarity_threshold");
+    });
+    await pool.query("UPDATE public.categories SET is_active=false WHERE id=$1", [category]);
+    expect((await createPgProductCatalogRepository(pool).find({ categoryIds: [category],page: 1,pageSize: 12 })).total).toBe(0);
+    const categories = await fetch(`${baseUrl}/api/categories`);
+    expect(categories.status).toBe(200);
+    expect((await categories.json()).some((item: { id: string }) => item.id === category)).toBe(false);
+    expect((await pool.query("SELECT has_function_privilege('public','catalog_internal.catalog_product_ids(text,uuid[],boolean,boolean)','EXECUTE') AS allowed")).rows[0].allowed).toBe(false);
+  }));
+  it("rejects offset abuse and malformed filters and keeps injection text as data", async () => {
+    for (const query of ["page=1001","categoryIds=bad","inStock=yes","q=ab","pageSize=51"]) {
+      expect((await fetch(`${baseUrl}/api/products/catalog?${query}`)).status).toBe(400);
+    }
+    const q = "x');DROP TABLE products;--";
+    const response = await fetch(`${baseUrl}/api/products/catalog?q=${encodeURIComponent(q)}`);
+    expect(response.status).toBe(200);
+    expect((await response.json()).total).toBe(0);
+    expect((await pool.query("SELECT count(*)::int AS total FROM public.products")).rows[0].total).toBe(20002);
+  });
+  it("measures numbered and typo search on the full fixture without forcing indexes", async () => {
+    const catalog = createPgProductCatalogRepository(pool);
+    expect((await catalog.find({ q: "unicobuscablx",page: 1,pageSize: 12 })).total).toBe(1);
+    const query = buildProductCatalogQuery({ q: "unicobuscablx",page: 1,pageSize: 12 });
+    let restrictedMs = 0;
+    await asRole("boticaya_catalog_app", async (client) => {
+      const result = await client.query({ text: `EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) ${query.text}`,values: query.values });
+      restrictedMs = result.rows[0]["QUERY PLAN"][0]["Execution Time"];
+    });
+    const body = (await pool.query("SELECT prosrc FROM pg_proc WHERE oid='catalog_internal.catalog_product_ids(text,uuid[],boolean,boolean)'::regprocedure")).rows[0].prosrc as string;
+    let sql = body;
+    ["normalized_query","selected_categories","featured_only","in_stock_only"].forEach((name,index) => {
+      sql = sql.replace(new RegExp(`\\b${name}\\b`,"g"),`($${index+1}::${["text","uuid[]","boolean","boolean"][index]})`);
+    });
+    const inner = await pool.query({ text: `EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) ${sql}`,values: ["unicobuscablx",null,null,null] });
+    const indexes = planIndexes(inner.rows[0]["QUERY PLAN"]);
+    expect(indexes).toContain("products_search_text_gin");
+    console.info(JSON.stringify({ numberedCatalogPlan: { records: 20002, restrictedMs,
+      internalMs: inner.rows[0]["QUERY PLAN"][0]["Execution Time"],indexes } }));
+  });
+});
 
 it("imports atomically as drafts and preserves existing commercial data on rerun", async () => {
   expect(await importCatalog(pool, importFixture)).toEqual({ total: 3, inserted: 3, skipped: 0 });
@@ -96,6 +185,7 @@ beforeAll(async () => {
   );
   await pool.query(migration);
   editorCreated = true;
+  await pool.query(await readFile(new URL("../sql/migrations/004-catalog-numbered-search.sql", import.meta.url),"utf8"));
   categoryId = (await pool.query("SELECT id FROM public.categories LIMIT 1"))
     .rows[0].id;
   brandId = (await pool.query("SELECT id FROM public.brands LIMIT 1")).rows[0]
