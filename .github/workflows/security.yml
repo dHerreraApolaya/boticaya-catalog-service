@@ -23,12 +23,10 @@ jobs:
           node-version: 22
       - run: node --test scripts/check-sensitive-files.test.mjs
       - run: node scripts/check-sensitive-files.mjs
-      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_ENABLE_COMMENTS: false
-          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: false
-          GITLEAKS_ENABLE_SUMMARY: false
+      - name: Install pinned Gitleaks CLI
+        run: go install github.com/zricethezav/gitleaks/v8@v8.30.1
+      - name: Scan complete imported history
+        run: '"$(go env GOPATH)/bin/gitleaks" git --redact --no-banner'
   dependencies:
     name: Dependency audit
     runs-on: ubuntu-latest
