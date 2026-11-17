@@ -50,3 +50,9 @@ Requests through the actual frontend URL `http://localhost:5173` returned:
 Browser checks confirmed the matching `DEMO-BY-0001` card with price S/ 4.50, eight featured cards and the demo notice. The Medicamentos filter returned 84 products across seven pages; the typo search showed matching Paracetamol demo cards. An empty submitted search displayed all 500 products and numbered page navigation; page two showed a distinct first item and returning to page one worked. This was the actual Supabase-backed API, not a stub or local fixture fallback. Product images remain the project's generic SVG.
 
 Frontend typecheck, lint, build and 192 tests passed, including demo disclosure before purchase and fictional-data text at confirmation. The existing checkout simulation still explicitly creates no charge or real delivery. Code is stored locally on `codex/catalog-api-integration` in each repository; no merge or production publication was performed.
+
+## Read-only database review before submission — 2026-11-17
+
+Verified again through the dedicated runtime reader: 500 published demo products, 455 with stock, 12 featured (11 with stock), six categories, five brands and zero product images. All four catalog tables have RLS enabled and forced; effective reader permissions and actual client TLS passed verification. No identity rows were queried.
+
+The deployed columns, category/brand/image foreign keys, normalized SKU uniqueness, vector/trigram indexes and published/featured pagination indexes are present. Both `unaccent` and `pg_trgm` are installed in `extensions`. No additional schema migration is required for the current demo listing/search scope. Zero image rows are intentional while the frontend uses its own generic graphic.
