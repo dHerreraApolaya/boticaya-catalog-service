@@ -25,16 +25,21 @@ export function buildProductSearchQuery(search: ProductSearch, terms?: SearchTer
   if (search.after) conditions.push(`p.id>${parameter(search.after)}`);
   const limit = parameter(search.limit + 1);
   return {
-    text: `SELECT p.id,p.sku,p.name,c.name AS category,coalesce(b.name,'') AS brand,p.presentation,
+    text: `WITH matching AS MATERIALIZED (
+      SELECT p.id FROM public.products p JOIN public.categories c ON c.id=p.category_id
+      LEFT JOIN public.brands b ON b.id=p.brand_id
+      WHERE ${conditions.join(' AND ')}
+    ), page AS (SELECT id FROM matching ORDER BY id LIMIT ${limit})
+    SELECT p.id,p.sku,p.name,c.name AS category,coalesce(b.name,'') AS brand,p.presentation,
       p.price_in_cents AS "priceInCents",p.currency,p.available_quantity AS "availableQuantity",
       p.available_quantity>0 AS "inStock",p.requires_prescription AS "requiresPrescription",p.is_featured AS "isFeatured",
       image.metadata AS image
-      FROM public.products p JOIN public.categories c ON c.id=p.category_id
+      FROM page JOIN public.products p ON p.id=page.id JOIN public.categories c ON c.id=p.category_id
       LEFT JOIN public.brands b ON b.id=p.brand_id
       LEFT JOIN LATERAL (SELECT jsonb_build_object('bucket',i.bucket,'storagePath',i.storage_path,'altText',i.alt_text) AS metadata
         FROM public.product_images i WHERE i.product_id=p.id AND i.status='published'
         ORDER BY i.display_order,i.id LIMIT 1) image ON true
-      WHERE ${conditions.join(' AND ')} ORDER BY p.id LIMIT ${limit}`,
+      ORDER BY p.id`,
     values,
   };
 }
