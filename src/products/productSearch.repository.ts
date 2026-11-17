@@ -2,7 +2,13 @@ import type { Pool } from 'pg';
 import type { ProductSearch } from './productSearch.schema.js';
 import type { ProductSearchItem, ProductSearchRepository } from './productSearch.service.js';
 
-export function buildProductSearchQuery(search: ProductSearch) {
+interface SearchTerms { skuKey: string; tsquery: string }
+export async function loadProductSearchTerms(pool: Pick<Pool, 'query'>, query: string): Promise<SearchTerms> {
+  const result = await pool.query<SearchTerms>("SELECT catalog_internal.normalize($1) AS \"skuKey\",coalesce(catalog_internal.search_query($1)::text,'') AS tsquery", [query]);
+  return result.rows[0]!;
+}
+
+export function buildProductSearchQuery(search: ProductSearch, terms?: SearchTerms) {
   const values: (string | number | boolean)[] = [];
   const conditions = ["p.status='published'", 'c.is_active', '(b.id IS NULL OR b.is_active)'];
   const parameter = (value: string | number | boolean) => {
@@ -10,8 +16,8 @@ export function buildProductSearchQuery(search: ProductSearch) {
     return `$${values.length}`;
   };
   if (search.q) {
-    const query = parameter(search.q);
-    conditions.push(`(p.sku_key=catalog_internal.normalize(${query}) OR p.search_document @@ catalog_internal.search_query(${query}))`);
+    if (!terms) throw new Error('Search terms must be normalized before building a query');
+    conditions.push(`(p.sku_key=${parameter(terms.skuKey)} OR p.search_document @@ ${parameter(terms.tsquery)}::tsquery)`);
   }
   if (search.categoryId) conditions.push(`p.category_id=${parameter(search.categoryId)}::uuid`);
   if (search.brandId) conditions.push(`p.brand_id=${parameter(search.brandId)}::uuid`);
@@ -35,7 +41,8 @@ export function buildProductSearchQuery(search: ProductSearch) {
 export function createPgProductSearchRepository(pool: Pool): ProductSearchRepository {
   return {
     async find(search) {
-      const result = await pool.query<ProductSearchItem>(buildProductSearchQuery(search));
+      const terms = search.q ? await loadProductSearchTerms(pool, search.q) : undefined;
+      const result = await pool.query<ProductSearchItem>(buildProductSearchQuery(search, terms));
       return result.rows;
     },
   };

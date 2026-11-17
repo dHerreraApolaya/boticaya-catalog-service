@@ -91,6 +91,9 @@ BEGIN
     IF NEW.brand_id IS NOT NULL THEN
         SELECT name INTO STRICT selected_brand FROM public.brands WHERE id=NEW.brand_id;
     END IF;
+    IF TG_OP='UPDATE' AND NEW.id IS DISTINCT FROM OLD.id THEN
+        RAISE EXCEPTION 'Product identifiers are immutable' USING ERRCODE='23514';
+    END IF;
     NEW.category := selected_category;
     NEW.brand := coalesce(selected_brand, '');
     NEW.name := trim(NEW.name);

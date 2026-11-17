@@ -16,9 +16,10 @@ describe('product search contract', () => {
   it('binds every client value without incorporating it in SQL text', () => {
     const injection = "x'); DROP TABLE public.products; --";
     const search = { q: injection, categoryId: '3dfdf29f-1665-4f04-9a4e-a24de2da3f04', brandId: '6ad4a21e-c5bd-4814-a537-fc39743055bc', featured: false, after: injection, limit: 3 };
-    const query = buildProductSearchQuery(search);
+    const query = buildProductSearchQuery(search, { skuKey: injection, tsquery: 'safe:*' });
     expect(query.text).not.toContain(injection);
-    expect(query.values).toEqual([injection, search.categoryId, search.brandId, false, injection, 4]);
+    expect(query.values).toEqual([injection, 'safe:*', search.categoryId, search.brandId, false, injection, 4]);
+    expect(() => buildProductSearchQuery(search)).toThrow('normalized');
   });
   it('returns a stable next cursor only if an extra row exists', async () => {
     const rows = [{ id: 'a' }, { id: 'b' }, { id: 'c' }] as ProductSearchItem[];

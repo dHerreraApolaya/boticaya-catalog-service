@@ -6,7 +6,7 @@ import type { AddressInfo } from 'node:net';
 import { Pool, type PoolClient } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
-import { buildProductSearchQuery } from '../src/products/productSearch.repository.js';
+import { buildProductSearchQuery, loadProductSearchTerms } from '../src/products/productSearch.repository.js';
 
 const url = process.env.BOTICAYA_TEST_DATABASE_URL;
 if (!url || !new URL(url).pathname.endsWith('_test')) throw new Error('Use an isolated test database ending in _test');
@@ -67,6 +67,10 @@ function planIndexes(value: unknown): string[] {
   return [...(typeof record['Index Name'] === 'string' ? [record['Index Name']] : []), ...Object.values(record).flatMap(planIndexes)];
 }
 
+async function queryFor(search: Parameters<typeof buildProductSearchQuery>[0]) {
+  return buildProductSearchQuery(search, search.q ? await loadProductSearchTerms(pool, search.q) : undefined);
+}
+
 describe('normalized product module', () => {
   it('preserves existing identifiers, labels and stock', async () => {
     const row = (await pool.query("SELECT id,category,brand,available_quantity,category_id,brand_id FROM public.products WHERE id='legacy-1'")).rows[0];
@@ -74,9 +78,9 @@ describe('normalized product module', () => {
   });
   it('supports accent-insensitive keywords and safe prefix search without leaking drafts', async () => {
     await asRole('boticaya_catalog_app', async client => {
-      const result = await client.query(buildProductSearchQuery({ q: 'UNICOBUSC', limit: 12 }));
+      const result = await client.query(await queryFor({ q: 'UNICOBUSC', limit: 12 }));
       expect(result.rows.map(row => row.id)).toEqual(['volume-012345']);
-      const shortSku = await client.query(buildProductSearchQuery({ q: 'VOL-12345', limit: 12 }));
+      const shortSku = await client.query(await queryFor({ q: 'VOL-12345', limit: 12 }));
       expect(shortSku.rows.some(row => row.id === 'volume-012345')).toBe(true);
     });
   });
@@ -118,11 +122,11 @@ describe('normalized product module', () => {
   });
   it('refreshes searchable labels after a brand rename and hides inactive brands', async () => {
     await pool.query("UPDATE public.brands SET name='Marca renombrada' WHERE id=$1",[brandId]);
-    const result = await pool.query(buildProductSearchQuery({ q: 'renombrada', limit: 1 }));
+    const result = await pool.query(await queryFor({ q: 'renombrada', limit: 1 }));
     expect(result.rows).toHaveLength(2);
     await pool.query('UPDATE public.brands SET is_active=false WHERE id=$1',[brandId]);
     await asRole('boticaya_catalog_app',async client => {
-      expect((await client.query(buildProductSearchQuery({ q: 'renombrada', limit: 1 }))).rows).toEqual([]);
+      expect((await client.query(await queryFor({ q: 'renombrada', limit: 1 }))).rows).toEqual([]);
     });
     await pool.query('UPDATE public.brands SET is_active=true WHERE id=$1',[brandId]);
   });
@@ -134,18 +138,18 @@ describe('normalized product module', () => {
       VALUES ('legacy-1','product-images','products/legacy/card.webp','image/webp',100,200,200,'published','Producto')`);
     await asRole('boticaya_catalog_app', async client => {
       expect((await client.query('SELECT id FROM public.product_images')).rows).toHaveLength(1);
-      const result = await client.query(buildProductSearchQuery({ q: 'LEG-1', limit: 12 }));
+      const result = await client.query(await queryFor({ q: 'LEG-1', limit: 12 }));
       expect(result.rows[0].image).toMatchObject({ bucket: 'product-images', storagePath: 'products/legacy/card.webp' });
       await expect(client.query("UPDATE public.products SET name='forbidden'")).rejects.toMatchObject({ code: '42501' });
     });
   });
   it('measures selective search plans without disabling sequential scans', async () => {
-    const query = buildProductSearchQuery({ q: 'unicobuscable', limit: 12 });
+    const query = await queryFor({ q: 'unicobuscable', limit: 12 });
     const privileged = await pool.query({ text: `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${query.text}`, values: query.values });
-    expect(planIndexes(privileged.rows[0]['QUERY PLAN'])).toContain('products_search_gin');
     await asRole('boticaya_catalog_app', async client => {
       const restricted = await client.query({ text: `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${query.text}`, values: query.values });
       console.info(JSON.stringify({ catalogSearchPlan: { privilegedIndexes: planIndexes(privileged.rows[0]['QUERY PLAN']), restrictedIndexes: planIndexes(restricted.rows[0]['QUERY PLAN']) } }));
+      expect(planIndexes(privileged.rows[0]['QUERY PLAN'])).toContain('products_search_gin');
       expect(restricted.rows[0]['QUERY PLAN'][0]['Execution Time']).toBeGreaterThanOrEqual(0);
     });
   });
