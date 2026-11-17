@@ -42,5 +42,6 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version: 22
+      - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: node --test scripts/audit-dependencies.test.mjs
       - run: node scripts/audit-dependencies.mjs
