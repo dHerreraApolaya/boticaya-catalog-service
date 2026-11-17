@@ -1,4 +1,4 @@
-import type { ProductSearch } from './productSearch.schema.js';
+import type { ProductSearch } from "./productSearch.schema.js";
 
 export interface ProductSearchItem {
   id: string;
