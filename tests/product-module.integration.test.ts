@@ -6,6 +6,7 @@ import type { AddressInfo } from "node:net";
 import { Pool, type PoolClient } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
+import { demoCatalogSchema,seedDemoCatalog,DEMO_DESCRIPTION } from "../src/catalog-demo/demoCatalog.js";
 import { importCatalog } from "../src/catalog-import/importCatalog.js";
 import { productIdentity } from "../src/catalog-import/dataset.js";
 import { buildProductCatalogQuery,createPgProductCatalogRepository } from "../src/products/productCatalog.repository.js";
@@ -131,6 +132,33 @@ describe("numbered catalog integration", () => {
     expect(indexes).toContain("products_search_text_gin");
     console.info(JSON.stringify({ numberedCatalogPlan: { records: 20002, restrictedMs,
       internalMs: inner.rows[0]["QUERY PLAN"][0]["Execution Time"],indexes } }));
+  });
+});
+
+describe("owned demo catalog loading", () => {
+  it("publishes demo products, is repeatable, preserves edits and rolls back conflicts", async () => {
+    const dataset = demoCatalogSchema.parse(JSON.parse(await readFile(new URL("../data/catalog/boticaya-demo-v1.json",import.meta.url),"utf8")));
+    try {
+      expect(await seedDemoCatalog(pool,dataset)).toEqual({ total: 500,inserted: 500,skipped: 0 });
+      const id = dataset.products[0]!.id;
+      const catalog = createPgProductCatalogRepository(pool);
+      expect((await catalog.find({ q: "DEMO",page: 1,pageSize: 12 })).total).toBe(500);
+      await pool.query("UPDATE public.products SET price_in_cents=999,available_quantity=3 WHERE id=$1",[id]);
+      expect(await seedDemoCatalog(pool,dataset)).toEqual({ total: 500,inserted: 0,skipped: 500 });
+      expect((await pool.query("SELECT price_in_cents,available_quantity FROM public.products WHERE id=$1",[id])).rows[0]).toEqual({ price_in_cents: 999,available_quantity: 3 });
+      await asRole("boticaya_catalog_app", async (client) => {
+        expect((await client.query(buildProductCatalogQuery({ q: "DEMO",page: 1,pageSize: 12 }))).rows[0].total).toBe(500);
+      });
+      await pool.query("UPDATE public.products SET description='Not a demo-owned row' WHERE id=$1",[id]);
+      await expect(seedDemoCatalog(pool,dataset)).rejects.toThrow("Demo identity conflict");
+      await pool.query("UPDATE public.products SET description=$2 WHERE id=$1",[id,DEMO_DESCRIPTION]);
+      const category = (await pool.query("SELECT category_id FROM public.products WHERE id=$1",[id])).rows[0].category_id;
+      await pool.query("UPDATE public.categories SET is_active=false WHERE id=$1",[category]);
+      await expect(seedDemoCatalog(pool,dataset)).rejects.toThrow("Inactive demo directory");
+      await pool.query("UPDATE public.categories SET is_active=true WHERE id=$1",[category]);
+    } finally {
+      await pool.query("DELETE FROM public.products WHERE id=ANY($1::text[])",[dataset.products.map((p) => p.id)]);
+    }
   });
 });
 

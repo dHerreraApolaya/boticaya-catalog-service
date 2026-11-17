@@ -21,7 +21,8 @@
     "migrate": "pnpm build && node --env-file-if-exists=.env dist/database/migrate.js",
     "verify:database": "pnpm build && node --env-file-if-exists=.env scripts/verify-database.mjs",
     "import:catalog": "node --env-file-if-exists=.env scripts/import-catalog.mjs",
-    "verify:catalog-reader": "pnpm build && node --env-file-if-exists=.env scripts/verify-catalog-reader.mjs"
+    "verify:catalog-reader": "pnpm build && node --env-file-if-exists=.env scripts/verify-catalog-reader.mjs",
+    "seed:demo-catalog": "node --env-file-if-exists=.env scripts/seed-demo-catalog.mjs"
   },
   "dependencies": {
     "express": "5.3.0",

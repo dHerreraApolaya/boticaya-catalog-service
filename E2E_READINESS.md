@@ -1,5 +1,9 @@
 # Catalog integration readiness
 
+## Superseding development decision — 2026-11-17
+
+The owner has now authorized the 500 **owned fictional products**, demo prices and demo stock so the real Supabase-backed catalog can be demonstrated. The earlier requirement to publish only owner-supplied real commercial values no longer applies to this development demo. It remains inappropriate to infer or fabricate commercial values for a real catalog. See [DEMO_CATALOG.md](DEMO_CATALOG.md). No DIGEMID data or unlicensed images are imported. The original real-catalog business handoff below remains pending separately.
+
 ## Approved business decisions — 2026-11-17
 
 - Use products from the Peruvian market only. Prioritize DIGEMID and confirm bulk reuse rights before extracting or importing its catalog.
