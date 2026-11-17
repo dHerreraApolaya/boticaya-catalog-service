@@ -140,3 +140,7 @@ behavior; it does not establish access to the original `boticaya_dev`.
 ## Repository ownership and provenance
 
 This repository owns the Express catalog, inventory, local orders, SQL and API tests extracted from web-botica-ya `faaa5e6`. Java is retired. Frontend remains in web-botica-ya. The missing catalog SQL test fixture is restored from `6a8c255`. Existing Express implementation and contracts are unchanged. See CONTRIBUTING.md and AGENTS.md before contributing.
+
+## Supabase development setup
+
+See [SUPABASE.md](SUPABASE.md). Run `pnpm verify:database` to verify connectivity, SELECT permission and catalog columns without retrieving rows or changing the schema.
