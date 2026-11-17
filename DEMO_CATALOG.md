@@ -35,3 +35,18 @@ This command deliberately publishes **only its explicitly authorized fictional d
 ## Verification
 
 136 backend unit/integration tests passed using disposable PostgreSQL, including the 500-row load, idempotency, reader visibility, preservation of price/stock edits, collision rejection and inactive-directory rollback. Coverage exceeds the configured 80% minimum in every metric. The canonical snapshot checksum is `f075ddde4651894249a16d5318b20544028d07a8c473a5b6af1e70de22b30ba9`.
+
+## Applied development evidence — 2026-11-17
+
+The authorized seed from commit `5d46fcc` was applied deliberately to `botica-ya-dev` using the separate maintenance configuration: **500 inserted, 0 skipped**. The browser/runtime kept its existing restricted reader. No role, subscription, image bucket, order or identity record was changed.
+
+Requests through the actual frontend URL `http://localhost:5173` returned:
+
+- Featured and stocked, page size eight: 200, total 11, eight items; first ID `demo-product-0001`.
+- Complete catalog, page size twelve: 200, total 500, 42 pages.
+- Typo query `paracatamol`: 200, total 17, two pages.
+- Category directory: six entries.
+
+Browser checks confirmed the matching `DEMO-BY-0001` card with price S/ 4.50, eight featured cards and the demo notice. The Medicamentos filter returned 84 products across seven pages; the typo search showed matching Paracetamol demo cards. An empty submitted search displayed all 500 products and numbered page navigation; page two showed a distinct first item and returning to page one worked. This was the actual Supabase-backed API, not a stub or local fixture fallback. Product images remain the project's generic SVG.
+
+Frontend typecheck, lint, build and 192 tests passed, including demo disclosure before purchase and fictional-data text at confirmation. The existing checkout simulation still explicitly creates no charge or real delivery. Code is stored locally on `codex/catalog-api-integration` in each repository; no merge or production publication was performed.

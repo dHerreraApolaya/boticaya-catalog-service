@@ -1,5 +1,7 @@
 # Development catalog integration evidence
 
+Latest update: the owner subsequently authorized the project's fictional catalog and demo commercial values. **500 demo products are now loaded and visible**. See [the applied seed and browser evidence](DEMO_CATALOG.md). The empty-catalog checks below record the earlier connection stage; official DIGEMID data and real commercial publication remain outside this completed demonstration.
+
 Date: 2026-11-17. Target: existing `botica-ya-dev` only. No production deployment, new project, plan upgrade or paid service was created.
 
 ## Cost and authorization
